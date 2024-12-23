@@ -1,122 +1,132 @@
+"""
+Script to retrieve CVEs and Security Issues from a Cyberwatch instance
+based on a specified group.
+Author: Amine Hazi 
+"""
+
+import json
+import logging
 import requests
 from tqdm import tqdm
-import json
 from cyberwatch_api import Cyberwatch_Pyhelper
-import logging 
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 
 assets_of_group = []
 
+
 def get_group_id(group_name):
+    """
+    Retrieve the group ID from Cyberwatch API by the provided group name.
+    Returns the group ID if found, otherwise None.
+    """
     all_groups = []
     page = 1
     while True:
         try:
             response = Cyberwatch_Pyhelper().request(
                 method="get",
-                endpoint="/api/v3/groups?page={page}",
+                # Use an f-string so {page} is actually replaced by page.
+                endpoint=f"/api/v3/groups?page={page}",
                 params={'page': page},
             )
             response_data = next(response).json()
-            if len(response_data) < 100:
-                logging.info(f"Getting groups from page {page} first group : {response_data[0]['id']}")
-                all_groups.extend(response_data)
-                break
-            logging.info(f"Getting groups from page {page} first group : {response_data[0]['id']}")
+
+            logging.info("Getting groups from page %s. First group ID: %s",
+                         page, response_data[0]['id'])
+
             all_groups.extend(response_data)
+
+            # If we got fewer than 100 items, we assume we reached the last page
+            if len(response_data) < 100:
+                break
+
             page += 1
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error while getting cyberwatch groups : {e}")
+
+        except requests.exceptions.RequestException as exc:
+            logging.error("Error while getting Cyberwatch groups: %s", exc)
             break
+
     for group in all_groups:
         if group['name'].lower() == group_name.lower():
             return group['id']
     return None
 
+
 def get_assets_of_group(group_id):
+    """
+    Retrieve the list of assets (servers) for a given group ID and
+    store them in 'assets.json'.
+    """
     all_assets = []
     page = 1
     while True:
         try:
             response = Cyberwatch_Pyhelper().request(
                 method="get",
-                endpoint="/api/v3/servers?group_id={group_id}&page={page}",
+                endpoint=f"/api/v3/servers?group_id={group_id}&page={page}",
                 params={'page': page, 'group_id': group_id},
             )
             response_data = next(response).json()
-            if len(response_data) < 100:
-                logging.info(f"Getting assets from page {page} first asset : {response_data[0]['id']}")
-                all_assets.extend(response_data)
-                break
-            logging.info(f"Getting assets from page {page} first asset : {response_data[0]['id']}")
+
+            logging.info("Getting assets from page %s. First asset ID: %s",
+                         page, response_data[0]['id'])
+
             all_assets.extend(response_data)
+
+            if len(response_data) < 100:
+                break
+
             page += 1
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error while getting cyberwatch assets : {e}")
+
+        except requests.exceptions.RequestException as exc:
+            logging.error("Error while getting cyberwatch assets: %s", exc)
             break
-    with open("assets.json", "w") as f:
-        f.write(json.dumps(all_assets))
+
+    with open("assets.json", "w", encoding="utf-8") as file_out:
+        file_out.write(json.dumps(all_assets))
+
     return all_assets
 
-# Get all cves from Cyberwatch api 
+
 def get_cves(group):
+    """
+    Retrieve a list of CVE announcements for the given group name.
+    """
     all_cves = []
     page = 1
     while True:
         try:
             response = Cyberwatch_Pyhelper().request(
                 method="get",
-                endpoint="/api/v3/cve_announcements?groups[]={group}&page={page}",
+                endpoint=f"/api/v3/cve_announcements?groups[]={group}&page={page}",
                 params={'page': page, 'group': group},
             )
             response_data = next(response).json()
-            if len(response_data) < 100:
-                logging.info(f"Getting cves from page {page} first cve : {response_data[0]['cve_code']}")
-                all_cves.extend(response_data)
-                break
-            logging.info(f"Getting cves from page {page} first cve : {response_data[0]['cve_code']}")
+
+            logging.info("Getting CVEs from page %s. First CVE: %s",
+                         page, response_data[0]['cve_code'])
+
             all_cves.extend(response_data)
+
+            if len(response_data) < 100:
+                break
+
             page += 1
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error while getting cyberwatch cves : {e}")
+
+        except requests.exceptions.RequestException as exc:
+            logging.error("Error while getting cyberwatch cves: %s", exc)
             break
+
     return all_cves
 
-# Get all cves details from Cyberwatch api
-def get_all_cves_details(group, output_file):
-    logging.info("--------------- Getting all CVEs ---------------")
-    cves = get_cves(group)
-    total_cves = len(cves)
-    logging.info(f"--------------- Number of CVEs: {total_cves} ---------------")
-    logging.info("--------------- Getting CVE details ---------------")
-    
-    cves_details = []
-    progress_bar = tqdm(total=total_cves, desc="Processing CVEs", unit="CVE", dynamic_ncols=True)
-    
-    for cve in cves:
-        try:
-            response = Cyberwatch_Pyhelper().request(
-                method="get",
-                endpoint="/api/v3/cve_announcements/{cve_id}",
-                params={'cve_id': cve['cve_code']},
-            )
-            logging.info(f"Getting CVE details for {cve['cve_code']}")
-            response_data = next(response).json()
-            forge_cve_json_line(response_data, output_file)
-            cves_details.append(response_data)
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error while getting Cyberwatch CVE details: {e}")
-        progress_bar.update(1)
-    
-    progress_bar.close()
-    return cves_details
-
-import json
 
 def forge_cve_json_line(cve, output_file):
-    with open(output_file, 'a') as f:
+    """
+    Forge a single CVE JSON line and append it to the specified output_file.
+    """
+    with open(output_file, 'a', encoding="utf-8") as file_out:
         cve_json_line = {
             "type": "CVE",
             "cve_code": cve['cve_code'],
@@ -135,9 +145,10 @@ def forge_cve_json_line(cve, output_file):
         products_dict = {}
 
         for server in cve['servers']:
+            # Only include servers that are in assets_of_group
             if server['id'] not in [asset['id'] for asset in assets_of_group]:
                 continue
-            
+
             server_info = {
                 "active": server['active'],
                 "fixed_at": server['fixed_at'],
@@ -152,8 +163,14 @@ def forge_cve_json_line(cve, output_file):
             }
 
             for update in server['updates']:
-                product_name = update['current']['product'] if update['current'] else (update['target']['product'] if update['target'] else None)
-                version = update['current']['version'] if update['current'] else (update['target']['version'] if update['target'] else None)
+                product_name = None
+                version = None
+                if update['current']:
+                    product_name = update['current']['product']
+                    version = update['current']['version']
+                elif update['target']:
+                    product_name = update['target']['product']
+                    version = update['target']['version']
 
                 if product_name:
                     # Add to server updates
@@ -162,15 +179,15 @@ def forge_cve_json_line(cve, output_file):
                         "version": version
                     })
 
-                    # Normalize product name to lowercase to keep consistency
+                    # Normalize product name to lowercase
                     normalized_product = product_name.lower()
+
                     if normalized_product not in products_dict:
                         products_dict[normalized_product] = {
                             "assets": set(),
                             "versions": set()
                         }
 
-                    # Add the server and version to the product data
                     products_dict[normalized_product]["assets"].add(server['hostname'])
                     if version:
                         products_dict[normalized_product]["versions"].add(version)
@@ -189,66 +206,80 @@ def forge_cve_json_line(cve, output_file):
         cve_json_line["updates_assets"] = updates_assets
 
         # Write the line
-        f.write(json.dumps(cve_json_line) + '\n')
-        f.flush()
- 
-         
-# Get all security issues from Cyberwatch api
+        file_out.write(json.dumps(cve_json_line) + '\n')
+        file_out.flush()
+
+
+def get_all_cves_details(group, output_file):
+    """
+    Retrieve all CVEs for the given group, fetch their details,
+    and write them to the specified output file.
+    """
+    logging.info("--------------- Getting all CVEs ---------------")
+    cves = get_cves(group)
+    total_cves = len(cves)
+    logging.info("--------------- Number of CVEs: %s ---------------", total_cves)
+    logging.info("--------------- Getting CVE details ---------------")
+
+    cves_details = []
+    progress_bar = tqdm(total=total_cves, desc="Processing CVEs",
+                        unit="CVE", dynamic_ncols=True)
+
+    for cve in cves:
+        try:
+            response = Cyberwatch_Pyhelper().request(
+                method="get",
+                endpoint=f"/api/v3/cve_announcements/{cve['cve_code']}",
+                params={'cve_id': cve['cve_code']},
+            )
+            logging.info("Getting CVE details for %s", cve['cve_code'])
+            response_data = next(response).json()
+            forge_cve_json_line(response_data, output_file)
+            cves_details.append(response_data)
+        except requests.exceptions.RequestException as exc:
+            logging.error("Error while getting Cyberwatch CVE details: %s", exc)
+        progress_bar.update(1)
+
+    progress_bar.close()
+    return cves_details
+
+
 def get_security_issues():
+    """
+    Retrieve all security issues from Cyberwatch.
+    """
     all_security_issues = []
     page = 1
     while True:
         try:
             response = Cyberwatch_Pyhelper().request(
                 method="get",
-                endpoint="/api/v3/security_issues",
+                endpoint=f"/api/v3/security_issues?page={page}",
             )
             response_data = next(response).json()
-            if len(response_data) < 100:
-                logging.info(f"Getting security issues from page {page} first security issue : {response_data[0]['id']}")
-                all_security_issues.extend(response_data)
-                break
-            logging.info(f"Getting security issues from page {page} first security issue : {response_data[0]['id']}")
+
+            logging.info("Getting security issues from page %s. First security issue ID: %s",
+                         page, response_data[0]['id'])
+
             all_security_issues.extend(response_data)
+
+            if len(response_data) < 100:
+                break
+
             page += 1
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error while getting cyberwatch security issues : {e}")
+
+        except requests.exceptions.RequestException as exc:
+            logging.error("Error while getting cyberwatch security issues: %s", exc)
             break
+
     return all_security_issues
 
-# Get all security issues details from Cyberwatch api
-def get_all_security_issues_details(output_file):
-    logging.info("--------------- Getting all Security Issues ---------------")
-    security_issues = get_security_issues()
-    total_security_issues = len(security_issues)
-    logging.info(f"--------------- Number of Security Issues: {total_security_issues} ---------------")
-    logging.info("--------------- Getting Security Issues details ---------------")
-    
-    security_issues_details = []
-    progress_bar = tqdm(total=total_security_issues, desc="Processing Security Issues", unit="Security Issue")
-    
-    for security_issue in security_issues:
-        try:
-            response = Cyberwatch_Pyhelper().request(
-                method="get",
-                endpoint="/api/v3/security_issues/{id}",
-                params={'id': security_issue['id']},
-            )
-            logging.info(f"Getting Security Issue details for {security_issue['id']}")
-            response_data = next(response).json()
-            forge_security_issue_json_line(response_data, output_file)
-            security_issues_details.append(response_data)
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error while getting Cyberwatch Security Issue details: {e}")
-            break
-        finally:
-            progress_bar.update(1)
-    
-    progress_bar.close()
-    return security_issues_details
 
-# forge security issue json line
 def forge_security_issue_json_line(security_issue, output_file):
+    """
+    Forge a single Security Issue JSON line and append it to output_file,
+    but only if it has servers that belong to assets_of_group.
+    """
     relevant_servers = []
     for server in security_issue['servers']:
         for asset in assets_of_group:
@@ -257,7 +288,7 @@ def forge_security_issue_json_line(security_issue, output_file):
     if not relevant_servers:
         return
 
-    with open(output_file, 'a') as f:
+    with open(output_file, 'a', encoding="utf-8") as file_out:
         security_issue_json_line = {
             "type": "Security Issue",
             "id": security_issue['id'],
@@ -277,28 +308,68 @@ def forge_security_issue_json_line(security_issue, output_file):
                 "detected_at": server['detected_at']
             }
             security_issue_json_line["servers"].append(server_info)
-        f.write(json.dumps(security_issue_json_line) + '\n')
-        f.flush()
+        file_out.write(json.dumps(security_issue_json_line) + '\n')
+        file_out.flush()
 
 
-# main function
+def get_all_security_issues_details(output_file):
+    """
+    Retrieve all security issues and write their details to the output file.
+    """
+    logging.info("--------------- Getting all Security Issues ---------------")
+    security_issues = get_security_issues()
+    total_security_issues = len(security_issues)
+    logging.info("--------------- Number of Security Issues: %s ---------------",
+                 total_security_issues)
+    logging.info("--------------- Getting Security Issues details ---------------")
+
+    security_issues_details = []
+    progress_bar = tqdm(total=total_security_issues, desc="Processing Security Issues",
+                        unit="Security Issue")
+
+    for security_issue in security_issues:
+        try:
+            response = Cyberwatch_Pyhelper().request(
+                method="get",
+                endpoint=f"/api/v3/security_issues/{security_issue['id']}",
+                params={'id': security_issue['id']},
+            )
+            logging.info("Getting Security Issue details for %s", security_issue['id'])
+            response_data = next(response).json()
+            forge_security_issue_json_line(response_data, output_file)
+            security_issues_details.append(response_data)
+        except requests.exceptions.RequestException as exc:
+            logging.error("Error while getting Cyberwatch Security Issue details: %s", exc)
+            break
+        finally:
+            progress_bar.update(1)
+
+    progress_bar.close()
+    return security_issues_details
+
+
 def main():
-    
+    """
+    Main function: prompts the user for a group name,
+    retrieves assets, CVEs, and Security Issues, then writes them to a file.
+    """
     group = input("Enter the group name: ")
     group_id = get_group_id(group)
-    global assets_of_group
-    assets_of_group = get_assets_of_group(group_id)
 
     if not group_id:
-        logging.error("Group not found")
+        logging.error("Group '%s' not found", group)
         return
-    logging.info(f"Group id: {group_id}")
-    
+
+    logging.info("Group id: %s", group_id)
+
+    global assets_of_group  # pylint: disable=global-statement
+    assets_of_group = get_assets_of_group(group_id)
+
     output_file = f"Cyberwatch_scan_{group}.json"
-    
+
     get_all_cves_details(group, output_file)
     get_all_security_issues_details(output_file)
-        
+
+
 if __name__ == "__main__":
     main()
-
