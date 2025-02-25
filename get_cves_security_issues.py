@@ -148,7 +148,7 @@ def forge_cve_json(cve):
         "exploit_code_maturity": cve['exploit_code_maturity'],
         "cve_epss": cve['epss'],
         "cvss_v3": cve['cvss_v3'],
-        "cwes": [],
+        "cwes": cve['cwe'],
         "servers": []
     }
 
@@ -157,7 +157,7 @@ def forge_cve_json(cve):
         cwe_id = cve['cwe']['cwe_id'].split('-')[1]
         # Split the cwe_id and get its parents
         cwe_parents = get_cwe_parents_list(cwe_db, cwe_id)
-        cve_json["cwes"] = [cwe_id] + cwe_parents
+        cve_json["cwes"]["cwe_id"] = [cwe_id] + cwe_parents
 
     # Dictionary to track product data: product -> { "assets": set(), "versions": set() }
     products_dict = {}
